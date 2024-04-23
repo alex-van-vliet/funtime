@@ -1,0 +1,18 @@
+R"---(
+{
+  "null": null,
+  "true": true,
+  "false": false,
+  "zero": 0,
+  "positive_int": 123456790,
+  "negative_int": -23,
+  "positive_float": 1.23,
+  "negative_float": -4.56789,
+  "string": "test",
+  "list": [1, "2", 3],
+  "object": {
+    "a": 2,
+    "b": "test"
+  }
+}
+)---"
