@@ -53,9 +53,10 @@ private:
 class Actor {
 public:
     Actor(): thread{[&]{
+        std::cerr << "Actor thread: " << std::this_thread::get_id() << std::endl;
         while (!stop) {
             MoveOnlyFunction<void> fun;
-            
+
             {
                 std::lock_guard lock{mutex};
                 if (!messages.empty()) {
@@ -68,6 +69,7 @@ public:
                 fun();
             }
         }
+        std::cerr << "Actor thread finished" << std::endl;
     }} {
     }
 
@@ -101,6 +103,7 @@ struct Method {
         // self is not passable by copy, so we mask it and take the instance per reference
         self.actor.send([=, &self = self.instance, p = std::move(p)] mutable {
             if constexpr (std::is_same_v<return_type, void>) {
+                self.[: Member :](arguments...);
                 p.set_value();
             } else {
                 // Not forwarding as copied in lambda
@@ -112,54 +115,39 @@ struct Method {
     }
 };
 
-template<typename T, std::size_t I>
-consteval bool is_finished() {
-    auto members = members_of(^T);
-    return members.size() <= I;
-}
-
-template<typename T, std::size_t I = 0>
-consteval int add_members(std::vector<std::meta::info>& members) {
-    if constexpr (is_finished<T, I>()) {
-        return I;
-    } else {
-        constexpr auto member = members_of(^T)[I];
-
-        if constexpr (std::meta::is_public(member)
-            && std::meta::is_function(member)
-            && !std::meta::is_special_member(member)) {
-        
-            members.push_back(std::meta::data_member_spec(^Method<member>, {
-                .name=name_of(member), .is_static=true,
-            }));
-        }
-
-        return add_members<T, I + 1>(members);
-    }
-}
-
 template<typename Name, typename T>
 consteval auto make_actor() {
     std::vector<std::meta::info> members{
         std::meta::data_member_spec(^T, {.name="instance"}),
         std::meta::data_member_spec(^Actor, {.name="actor"}),
     };
-    
-    add_members<T>(members);
-    
+    ([&]<std::size_t ...MemberIndex>(std::index_sequence<MemberIndex...>) {
+        ((void)(([&]{
+            constexpr auto member = members_of(^T)[MemberIndex];
+            if constexpr (std::meta::is_public(member)
+                && std::meta::is_function(member)
+                && !std::meta::is_special_member(member)) {
+
+                members.push_back(std::meta::data_member_spec(^Method<member>, {
+                    .name=name_of(member), .is_static=true,
+                }));
+            }
+        })()), ...);
+    })(std::make_index_sequence<members_of(^T).size()>{});
+
     return define_class(^Name, members);
 }
 
 class CalculatorImpl {
 public:
     int add(int i) {
-        std::cout << "Calling add, original value " << value << ", adding " << i << std::endl; 
+        std::cerr << "[" << std::this_thread::get_id() << "] Calling add, original value " << value << ", adding " << i << std::endl;
         value += i;
         return value;
     }
 
     void reset() {
-        std::cout << "Calling reset, original value " << value << std::endl;
+        std::cerr << "[" << std::this_thread::get_id() << "] Calling reset, original value " << value << std::endl;
         value = 0;
     }
 
@@ -171,6 +159,8 @@ struct Calculator;
 using Calculator = [: make_actor<Calculator, CalculatorImpl>() :];
 
 int main() {
+    std::cout << "Main thread: " << std::this_thread::get_id() << std::endl;
+
     Calculator calc;
     // Only data members are supported, so we have to pass the calculator as an argument
     auto v1 = Calculator::add(calc, 2);
